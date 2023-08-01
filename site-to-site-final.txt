@@ -1,0 +1,154 @@
+VPC - 1
+SUBNETS - 3 (in 3 availability zones)
+IGW - I want internet
+Route table -> COMMUNICATION FROM INTERNET TO MY MACHINES
+Security groups -> Firewall rules
+
+EC2
+----
+Key pairs
+
+
+
+
+
+VPC -> Edit DNS Hostnames
+EIP+NAT Gateway
+
+
+00a278f409563b387
+
+1. Create customer gateway with public IP of your machine
+2. Create Virtual Private Gateway and attach it to your VPC
+3. Create Site-to-Site VPN with 
+	
+	Remote IPv4 network CIDR - 0.0.0.0/0
+	Local IPv4 network CIDR - 0.0.0.0/0
+	Choose statis in "Routing options" and choose 0.0.0.0/0 as CIDR
+	
+	*Download openswan configuration
+	 
+4. After successful set up Tunnel1 will be up
+
+5. Set up local machine liberswan installation etc.,
+
+   dnf install libreswan
+   Follow openswan configuration
+   
+   Do ipsec verify
+   
+   [root@v2 ipsec.d]# ipsec verify
+Verifying installed system and configuration files
+
+Version check and ipsec on-path                         [OK]
+Libreswan 4.9
+Checking for IPsec support in kernel                    [OK]
+ NETKEY: Testing XFRM related proc values
+         ICMP default/send_redirects                    [NOT DISABLED]
+
+  Disable /proc/sys/net/ipv4/conf/*/send_redirects or XFRM/NETKEY will act on or                                               cause sending of bogus ICMP redirects!
+
+         ICMP default/accept_redirects                  [NOT DISABLED]
+
+  Disable /proc/sys/net/ipv4/conf/*/accept_redirects or XFRM/NETKEY will act on                                               or cause sending of bogus ICMP redirects!
+
+         XFRM larval drop                               [OK]
+Pluto ipsec.conf syntax                                 [OK]
+Checking rp_filter                                      [ENABLED]
+ /proc/sys/net/ipv4/conf/all/rp_filter                  [ENABLED]
+  rp_filter is not fully aware of IPsec and should be disabled
+Checking that pluto is running                          [FAILED]
+Checking 'ip' command                                   [OK]
+Checking 'iptables' command                             [OK]
+Checking 'prelink' command does not interfere with FIPS [OK]
+Checking for obsolete ipsec.conf options                [OK]
+
+ipsec verify: encountered 7 errors - see 'man ipsec_verify' for help
+
+Here, ensure everything is OK
+
+echo 0 | sudo tee /proc/sys/net/ipv4/conf/all/rp_filter
+echo 0 | sudo tee /proc/sys/net/ipv4/conf/*/send_redirects
+echo 0 | sudo tee /proc/sys/net/ipv4/conf/*/accept_redirects
+
+
+[root@v2 ipsec.d]# ipsec verify
+Verifying installed system and configuration files
+
+Version check and ipsec on-path                         [OK]
+Libreswan 4.9
+Checking for IPsec support in kernel                    [OK]
+ NETKEY: Testing XFRM related proc values
+         ICMP default/send_redirects                    [OK]
+         ICMP default/accept_redirects                  [OK]
+         XFRM larval drop                               [OK]
+Pluto ipsec.conf syntax                                 [OK]
+Checking rp_filter                                      [OK]
+Checking that pluto is running                          [FAILED]
+Checking 'ip' command                                   [OK]
+Checking 'iptables' command                             [OK]
+Checking 'prelink' command does not interfere with FIPS [OK]
+Checking for obsolete ipsec.conf options                [OK]
+
+ipsec verify: encountered 2 errors - see 'man ipsec_verify' for help
+
+pluto will turn OK after restarting, so restart ipsec
+
+[root@v2 ipsec.d]# systemctl restart ipsec
+[root@v2 ipsec.d]# ipsec verify
+Verifying installed system and configuration files
+
+Version check and ipsec on-path                         [OK]
+Libreswan 4.9
+Checking for IPsec support in kernel                    [OK]
+ NETKEY: Testing XFRM related proc values
+         ICMP default/send_redirects                    [OK]
+         ICMP default/accept_redirects                  [OK]
+         XFRM larval drop                               [OK]
+Pluto ipsec.conf syntax                                 [OK]
+Checking rp_filter                                      [OK]
+Checking that pluto is running                          [OK]
+ Pluto listening for IKE on udp 500                     [OK]
+ Pluto listening for IKE/NAT-T on udp 4500              [OK]
+ Pluto ipsec.secret syntax                              [OK]
+Checking 'ip' command                                   [OK]
+Checking 'iptables' command                             [OK]
+Checking 'prelink' command does not interfere with FIPS [OK]
+Checking for obsolete ipsec.conf options                [OK]
+[root@v2 ipsec.d]#
+[root@v2 ipsec.d]#
+
+
+Now add your tunnel to ipsec
+
+ipsec auto --add Tunnel1
+systemctl restart ipsec
+systemctl status ipsec
+
+6. Add 192.168.0.0/16 in route table with Virtual Private Gateway
+
+[Additional] Sample configuration files
+
+[root@v2 ipsec.d]# cat aws.conf
+conn Tunnel1
+        authby=secret
+        auto=start
+        left=%defaultroute
+        leftid=49.37.128.34
+        right=52.7.196.191
+        type=tunnel
+        ikelifetime=8h
+        keylife=1h
+        phase2alg=aes128-sha1;modp1024
+        ike=aes128-sha1;modp1024
+        keyingtries=%forever
+        keyexchange=ike
+        leftsubnet=192.168.0.0/16
+        rightsubnet=10.81.0.0/16
+        dpddelay=10
+        dpdtimeout=30
+        dpdaction=restart_by_peer
+		
+[root@v2 ipsec.d]# cat aws.secrets
+49.37.128.34 52.7.196.191: PSK "ndUh3fCv7TV4n0B0HtQbKAXs3jX6bjrQ"
+[root@v2 ipsec.d]#
