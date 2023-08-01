@@ -1,0 +1,566 @@
+Edit hosts file [3 machines]
+
+192.168.110.171	v1
+192.168.110.172 v2
+192.168.110.173 v3
+
+[root@v1 ~]# cat /etc/hosts
+192.168.110.171 v1
+192.168.110.172 v2
+192.168.110.173 v3
+
+127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4
+::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
+[root@v1 ~]#
+
+Create user postgres [3 machines]
+
+useradd postgres
+passwd postgres
+
+Add postgres user to sudoers file [3 machines]
+
+chmod 650 /etc/sudoers
+vi /etc/sudoers
+## Allow root to run any commands anywhere
+root    ALL=(ALL)       ALL
+postgres        ALL=(ALL)       ALL
+
+enable 5432 port [3 machines]
+
+firewall-cmd --zone=public --permanent --add-port 5432/tcp
+firewall-cmd --reload
+
+[root@v1 ~]# firewall-cmd --zone=public --permanent --add-port 5432/tcp
+success
+[root@v1 ~]# firewall-cmd --reload
+success
+[root@v1 ~]#
+
+Install PostgreSQL 15 [3 machines]
+-----------------------------------
+
+dnf install epel-release
+dnf --enablerepo=powertools install perl-IPC-Run -y
+
+dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-8-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+dnf -qy module disable postgresql
+dnf install -y postgresql15-server postgresql15-contrib postgresql15-devel
+
+mkdir -p /u01
+chown -R postgres:postgres /u01
+su - postgres
+mkdir -p /u01/pgsql/15
+
+/usr/pgsql-15/bin/initdb -D /u01/pgsql/15
+/usr/pgsql-15/bin/pg_ctl start -D /u01/pgsql/15
+
+Set bash_profile [ 3 machines]
+-----------------
+
+[postgres@v1 ~]$ cat .bash_profile
+# .bash_profile
+
+# Get the aliases and functions
+if [ -f ~/.bashrc ]; then
+        . ~/.bashrc
+fi
+
+PHOME=/usr/pgsql-15
+PATH=$PHOME/bin:$PATH
+
+export PATH
+
+# User specific environment and startup programs
+
+++++++++++
+
+Enable password less connectivity between 1 and 2 machines
+----------------------------------------------------------
+
+ssh-keygen -t rsa
+ssh postgres@192.168.110.172 mkdir -p .ssh
+cat .ssh/id_rsa.pub | ssh postgres@192.168.110.172 'cat >> .ssh/authorized_keys'
+ssh postgres@192.168.110.172 "chmod 700 .ssh; chmod 640 .ssh/authorized_keys"
+ssh postgres@192.168.110.172
+
+ssh-keygen -t rsa
+ssh postgres@192.168.110.171 mkdir -p .ssh
+cat .ssh/id_rsa.pub | ssh postgres@192.168.110.171 'cat >> .ssh/authorized_keys'
+ssh postgres@192.168.110.171 "chmod 700 .ssh; chmod 640 .ssh/authorized_keys"
+ssh postgres@192.168.110.171
+
+------------------------------
+
+change postgres password [1, 3 machines]
+
+[postgres@v1 15]$ psql
+psql (15.3)
+Type "help" for help.
+
+postgres=# \password
+Enter new password for user "postgres":
+Enter it again:
+postgres=#
+
+
+Edit the following [1 machine]
+
+postgresql.conf
+----------------
+listen_addresses = '*'
+wal_log_hints = on
+
+pg_hba.conf
+------------
+host    replication     all             0.0.0.0/0           md5
+host    all             all             0.0.0.0/0           md5
+
+Restart
+---------
+/usr/pgsql-15/bin/pg_ctl restart -D /u01/pgsql/15
+
+Enable archivelogging in postgresql.conf
+-------------------------------------------
+
+archive_mode = on
+archive_command = 'cp %p /u01/archivelogs/%f'
+
+/usr/pgsql-15/bin/pg_ctl restart -D /u01/pgsql/15    #restart
+
+Machine 2 - Ensure no instance is running and /u01/pgsql/15 is empty
+
+/usr/pgsql-15/bin/pg_basebackup -D /u01/pgsql/15 -P -h 192.168.110.171
+
+touch standby.signal													#in data directory
+primary_conninfo = 'user=postgres password=postgres host=192.168.110.171' #in postgresql.conf
+
+start the cluster
+
+create pgbench tables and verify [1 machine]
+/usr/pgsql-15/bin/pgbench -i postgres
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+pgpool
+------
+
+dnf install https://download.postgresql.org/pub/repos/yum/15/redhat/rhel-8-x86_64/pgpool-II-pg15-extensions-4.4.2-1.rhel8.x86_64.rpm
+
+cp  /etc/pgpool-II/pgpool.conf.sample /etc/pgpool-II/pgpool.conf
+Edit the configuration file /etc/pgpool-II/pgpool.conf
+
+listen_addresses = '*'
+pcp_socket_dir = '/var/run/postgresql'
+unix_socket_directories = '/var/run/postgresql'
+allow_clear_text_frontend_auth = on
+pool_passwd = ''
+
+
+# - Backend Connection Settings -
+
+backend_hostname0 = '192.168.110.171'                             
+backend_port0 = 5432
+backend_weight0 = 1
+backend_data_directory0 = '/u01/pgsql/15'
+backend_flag0 = 'ALLOW_TO_FAILOVER'                                 
+backend_application_name0 = 'server0'
+                                 
+backend_hostname1 = '192.168.110.172'
+backend_port1 = 5432
+backend_weight1 = 1
+backend_data_directory1 = '/u01/pgsql/15'
+backend_flag1 = 'ALLOW_TO_FAILOVER'
+backend_application_name1 = 'server1'
+
+
+sr_check_user = 'postgres'
+sr_check_password = 'postgres'
+sr_check_database = 'postgres'
+
+health_check_period =1
+
+health_check_user = 'postgres'
+health_check_password = 'postgres'
+health_check_database = 'postgres'
+
+touch /etc/pgpool-II/pool_passwd
+
+systemctl start pgpool-II
+
+[postgres@v3 ~]$ export PGPASSWORD=postgres
+[postgres@v3 ~]$ psql  -U postgres -p 9999 postgres  -c "show pool_nodes"
+ node_id |    hostname     | port | status | pg_status | lb_weight |  role   | pg_role | select_cnt | load_balance_node | replication_delay | replication_st
+ate | replication_sync_state | last_status_change
+---------+-----------------+------+--------+-----------+-----------+---------+---------+------------+-------------------+-------------------+---------------
+----+------------------------+---------------------
+ 0       | 192.168.110.171 | 5432 | up     | up        | 0.500000  | primary | primary | 0          | true              | 0                 |
+    |                        | 2023-07-21 19:39:51
+ 1       | 192.168.110.172 | 5432 | up     | up        | 0.500000  | standby | standby | 0          | false             | 0                 |
+    |                        | 2023-07-21 19:39:51
+(2 rows)
+
+[postgres@v3 ~]$
+
+Test
+----
+/usr/pgsql-15/bin/pgbench -c 10 -t 10 postgres -p 9999 -S
+/usr/pgsql-15/bin/pgbench -c 10 -t 10 postgres -p 9999 
+psql  -U postgres -p 9999 postgres  -c "show pool_nodes"
+
+If the following error
+FATAL:  initializing pool password, failed to open file:"/etc/pgpool-II/pool_passwd"
+touch /etc/pgpool-II/pool_passwd
+
+-----------------------------------------------------------------------------------------------
+
+pgbouncer [machine 3]
+---------
+yum install -y pgbouncer  
+
+SELECT CONCAT('"',pg_shadow.usename, '" "', passwd, '"') FROM pg_shadow;
+
+firewall-cmd --zone=public --permanent --add-port 6432/tcp
+firewall-cmd --reload
+
+
+[root@test03 ~]# cat /etc/pgbouncer/userlist.txt
+"postgres" "SCRAM-SHA-256$4096:Mpf4SdTShgarSF9S1RetiQ==$eG2NUANe4ym8o4zPb2X7uQSHAMf3BRHtgm+N6u10bhY=:nwzz8umqcmfhevLJpzF+egkH+s4yvYpMzTmi2vtsKsI="
+
+[root@test03 ~]#
+cd /etc/pgbouncer
+pgbouncer.ini
+----------------
+[databases]
+postgres = host=192.168.110.171 port=5432 dbname=postgres
+
+listen_addr = *					#edit
+listen_port = 6432				#edit
+
+auth_type = trust  				#edit
+auth_file = /etc/pgbouncer/userlist.txt		#edit
+
+systemctl start pgbouncer
+systemctl status pgbouncer
+
+/usr/pgsql-15/bin/pgbench -c 10 -t 10 -p 6432 postgres -h 192.168.110.171
+
++++++++++++++++++++++++++++++++++++++++++++
+
+
+;; Default pool size.  20 is good number when transaction pooling
+;; is in use, in session pooling it needs to be the number of
+;; max clients you want to handle at any moment
+
+
+;;;
+;;; Connection limits
+;;;
+
+;; Total number of clients that can connect
+;max_client_conn = 100
+
+;; Default pool size.  20 is good number when transaction pooling
+;; is in use, in session pooling it needs to be the number of
+;; max clients you want to handle at any moment
+;default_pool_size = 20
+
+;; Minimum number of server connections to keep in pool.
+;min_pool_size = 0
+
+; how many additional connection to allow in case of trouble
+;reserve_pool_size = 0
+
+;; If a clients needs to wait more than this many seconds, use reserve
+;; pool.
+;reserve_pool_timeout = 5
+
+;; Maximum number of server connections for a database
+;max_db_connections = 0
+
+;; Maximum number of server connections for a user
+;max_user_connections = 0
+
+;; If off, then server connections are reused in LIFO manner
+;server_round_robin = 0
+
+ 
+[postgres@lab01 ~]$ psql -U postgres -p 6432 pgbouncer -h localhost
+Password for user postgres:
+psql (15.3, server 1.19.1/bouncer)
+WARNING: psql major version 15, server major version 1.19.
+         Some psql features might not work.
+Type "help" for help.
+
+pgbouncer=#
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Oracle 19c
+
+dnf --enablerepo=powertools install xorg-x11-apps -y
+
+[root@v1 ~]# xclock
+Warning: Missing charsets in String to FontSet conversion
+[root@v1 ~]# xauth list
+v1/unix:10  MIT-MAGIC-COOKIE-1  0bb25bd4d6b9c50612d2add2981d05eb
+v1/unix:11  MIT-MAGIC-COOKIE-1  695e0b160c5545e2a828215e24a3b010
+[root@v1 ~]# su - oracle
+[oracle@v1 ~]$ xauth add v1/unix:10  MIT-MAGIC-COOKIE-1  0bb25bd4d6b9c50612d2add2981d05eb
+xauth:  file /home/oracle/.Xauthority does not exist
+[oracle@v1 ~]$
+[oracle@v1 ~]$ xauth add v1/unix:10  MIT-MAGIC-COOKIE-1  0bb25bd4d6b9c50612d2add2981d05eb
+[oracle@v1 ~]$ xauth add v1/unix:11  MIT-MAGIC-COOKIE-1  695e0b160c5545e2a828215e24a3b010
+export DISPLAY=localhost:10.0
+
+https://logic.edchen.org/how-to-resolve-ins-08101-unexpected-error/
+
+https://oracle-base.com/articles/19c/oracle-db-19c-installation-on-oracle-linux-8
+
+cd /softwares/demo/schema/human_resources/
+
+sqlplus / as sysdba
+@hr_main.sql
+
+____====================================================================
+
+1. Pre-requisite is DBD:ORACLE
+
+	dnf install perl
+	dnf install perl-devel
+	yum install https://yum.oracle.com/repo/OracleLinux/OL8/codeready/builder/x86_64/getPackage/libnsl2-devel-1.2.0-2.20180605git4a062cf.el8.x86_64.rpm
+	
+	
+	- Download and extract DBD:ORACLE
+	
+	wget https://cpan.metacpan.org/authors/id/Z/ZA/ZARQUON/DBD-Oracle-1.83.tar.gz
+	tar -xf DBD-Oracle-1.83.tar.gz
+	cd /root/DBD-Oracle-1.83
+	
+	export ORACLE_HOME=/softwares
+	
+    perl Makefile.PL
+    make && make install
+	
+2. DBD:pg (optional)
+
+	- Download and extract DBD:pg
+	
+	wget https://cpan.metacpan.org/authors/id/T/TU/TURNSTEP/DBD-Pg-3.16.3.tar.gz
+	export PATH=/usr/pgsql-15/bin:$PATH
+	
+    perl Makefile.PL
+    make && make install
+	
+3. Download ora2pg-x
+
+	wget https://github.com/darold/ora2pg/archive/refs/heads/master.zip
+	unzip master.zip
+    cd ora2pg-x.x/
+    perl Makefile.PL
+    make && make install
+	
+	
+4. Set up
+
+cd /etc/ora2pg/
+cp ora2pg.conf.dist ora2pg.conf
+
+Take report -> ora2pg -o mydata.sql
+
+pgbackrest
+-----------
+
+
+1. yum install pgbackrest [both machines]
+
+2. set up passwordless connectivity for postgres user between both machines [both machines]
+
+3. postgresql.conf [prod server]
+
+archive_command = 'pgbackrest --stanza=v1 archive-push %p'
+archive_mode = on
+listen_addresses = '*'
+log_line_prefix = ''
+
+4. Run in both machines
+
+mkdir -p -m 770 /var/log/pgbackrest
+chown postgres:postgres /var/log/pgbackrest
+
+mkdir -p /etc/pgbackrest
+mkdir -p /etc/pgbackrest/conf.d
+
+touch /etc/pgbackrest/pgbackrest.conf
+chmod 640 /etc/pgbackrest/pgbackrest.conf
+chown postgres:postgres /etc/pgbackrest/pgbackrest.conf
+
+mkdir -p /u01/backups/pgbackrest
+chown -R postgres:postgres /u01/backups/pgbackrest
+
+5. Run in production server (/etc/pgbackrest/pgbackrest.conf)
+
+[global]
+repo1-host=v2
+repo1-host-user=postgres
+repo1-retention-full=2
+repo1-retention-full-type=time
+process-max=2
+log-level-console=info
+log-level-file=debug
+
+[v1]
+pg1-path=/u01/pgsql/backrest
+
+6. Run in the backup server (/etc/pgbackrest/pgbackrest.conf)
+
+[global]
+repo1-path=/u01/backups/pgbackrest
+repo1-retention-full=2
+repo1-retention-full-type=time
+process-max=2
+log-level-console=info
+log-level-file=debug
+start-fast=y
+stop-auto=y
+
+[v1]
+pg1-path=/u01/pgsql/backrest
+pg1-host=v1
+pg1-port = 5432
+
+
+7. on a backup server
+sudo -u postgres pgbackrest --stanza=v1 stanza-create
+sudo -u postgres pgbackrest --stanza=v1 --log-level-console=info check
+sudo -u postgres pgbackrest --stanza=v1 --log-level-console=info backup
+
+8. Restore in production server
+
+sudo -u postgres pgbackrest --stanza=v1 restore
+
+
+++++++++
+
+https://github.com/citusdata/pg_cron
+https://pgxn.org/dist/pg_repack/
+https://severalnines.com/blog/dynamic-monitoring-postgresql-instances-using-pgtop/
+
+pg_cron
+---------
+-> download and install pgcron
+
+dnf install -y pg_cron_15
+
+# add to postgresql.conf
+
+# required to load pg_cron background worker on start-up
+shared_preload_libraries = 'pg_cron'
+
+postgres=# create extension pg_cron;
+CREATE EXTENSION
+postgres=#
+
+
+postgres=# create table emp (id serial, sal int,ins_date timestamp default now());
+CREATE TABLE
+postgres=#
+postgres=#
+postgres=# insert into emp (sal) values (100);
+INSERT 0 1
+postgres=# select * from emp;
+ id | sal |         ins_date
+----+-----+---------------------------
+  1 | 100 | 2023-06-12 00:49:36.40559
+(1 row)
+
+postgres=# SELECT cron.schedule('* * * * *', $$insert into emp (sal) values (100)$$);
+ schedule
+----------
+        1
+(1 row)
+
+postgres=#  select * from cron.job_run_details order by start_time desc limit 5;
+ jobid | runid | job_pid | database | username |              command               |  status   | return_message |            start_time            |
+     end_time
+-------+-------+---------+----------+----------+------------------------------------+-----------+----------------+----------------------------------+--------
+--------------------------
+     1 |     1 |  112354 | postgres | postgres | insert into emp (sal) values (100) | succeeded | INSERT 0 1     | 2023-06-12 00:51:00.034661+05:30 | 2023-06
+-12 00:51:00.037439+05:30
+(1 row)
+
+select * from cron.job;
+
+pg_repack
+----------
+
+wget https://api.pgxn.org/dist/pg_repack/1.4.8/pg_repack-1.4.8.zip
+unzip pg_repack-1.4.8.zip
+cd /root/pg_repack-1.4.8
+export PATH=/usr/pgsql-15/bin:$PATH
+
+
+yum install lz4-devel
+yum install readline*
+make
+make install
+
+postgres=# create extension pg_repack;
+CREATE EXTENSION
+postgres=#
+
+/usr/pgsql-15/bin/pg_repack --help
+
+[postgres@lab01 ~]$ /usr/pgsql-15/bin/pg_repack --all
+INFO: repacking database "postgres"
+INFO: repacking table "public.pgbench_accounts"
+INFO: repacking table "public.pgbench_branches"
+INFO: repacking table "public.pgbench_tellers"
+INFO: repacking database "template1"
+INFO: database "template1" skipped: pg_repack 1.4.8 is not installed in the database
+[postgres@lab01 ~]$
+
+[or]
+
+[postgres@lab01 ~]$ /usr/pgsql-15/bin/pg_repack -d postgres
+INFO: repacking table "public.pgbench_accounts"
+INFO: repacking table "public.pgbench_branches"
+INFO: repacking table "public.pgbench_tellers"
+[postgres@lab01 ~]$
+
+
+pg_top extension
+--------------------
+dnf install pg_top
+https://blog.mclaughlinsoftware.com/2022/03/02/postgresql-cli-error/
+
+pg_top
+
+
+pg_stat_statements
+-------------------
+
+shared_preload_libraries='pg_stat_statements'
+
+postgres=# create extension pg_stat_statements;
+CREATE EXTENSION
+postgres=# \q
+
+pg_stat_statements.max = 10000
+pg_stat_statements.track = all
+pg_stat_statements.track_utility = off
+pg_stat_statements.save = on
+
+Top 10 I/O-intensive queries
+
+SELECT query, calls, total_exec_time, rows, 100.0 * shared_blks_hit /
+               nullif(shared_blks_hit + shared_blks_read, 0) AS hit_percent
+          FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 5;
+		  
+ select userid::regrole, dbid, query
+    from pg_stat_statements
+    order by (blk_read_time+blk_write_time)/calls desc
+    limit 10;
+	
+Reset
+-----
+select pg_stat_statements_reset();

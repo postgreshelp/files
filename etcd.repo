@@ -1,0 +1,7 @@
+[etcd]
+name=PostgreSQL common RPMs for RHEL / Rocky $releasever - $basearch
+baseurl=http://ftp.postgresql.org/pub/repos/yum/common/pgdg-rhel8-extras/redhat/rhel-$releasever-$basearch
+enabled=1
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-PGDG
+repo_gpgcheck = 1

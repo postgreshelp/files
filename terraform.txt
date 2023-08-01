@@ -1,0 +1,131 @@
+https://developer.hashicorp.com/terraform/downloads
+
+[root@ip-10-82-2-84 ~]# unzip terraform_1.5.4_linux_386.zip
+Archive:  terraform_1.5.4_linux_386.zip
+replace terraform? [y]es, [n]o, [A]ll, [N]one, [r]ename: y
+  inflating: terraform
+[root@ip-10-82-2-84 ~]# ls -lrt
+total 113684
+-rw-------. 1 root root     6002 Dec 17  2020 original-ks.cfg
+-rw-------. 1 root root     6275 Dec 17  2020 anaconda-ks.cfg
+-rw-r--r--. 1 root root 34879507 May  9  2022 terraform_0.13.3_linux_amd64.zip
+-rwxr-xr-x. 1 root root 61841408 Jul 26 18:16 terraform
+-rw-r--r--. 1 root root 19670226 Jul 26 18:53 terraform_1.5.4_linux_386.zip
+[root@ip-10-82-2-84 ~]#
+[root@ip-10-82-2-84 ~]#
+[root@ip-10-82-2-84 ~]# mv terraform  /usr/local/bin/
+mv: overwrite '/usr/local/bin/terraform'?
+[root@ip-10-82-2-84 ~]#
+[root@ip-10-82-2-84 ~]#
+[root@ip-10-82-2-84 ~]#
+[root@ip-10-82-2-84 ~]#
+[root@ip-10-82-2-84 ~]# mv terraform  /usr/local/bin/
+mv: overwrite '/usr/local/bin/terraform'? yes
+[root@ip-10-82-2-84 ~]# /usr/local/bin/terraform -v
+Terraform v1.5.4
+on linux_386
+
+
++++
+
+
+[root@ip-10-82-2-84 terraform]# cat rds.tf
+provider "aws" {
+  region = "us-east-1"  # Change this to your desired region
+  access_key = "AKIA3TW7NMABPCYM4WIC"
+  secret_key = "B+qk6fKH20EGvRzS5a6IJq9XhU/0G+XVvZNIbbpE"
+}
+# Replace "vpc-12345678" with the ID of your existing VPC
+data "aws_vpc" "existing_vpc" {
+  id = "vpc-0de8e66ff073f233d"
+}
+
+
+# Replace "sg-12345678" with the ID of your existing security group
+data "aws_security_group" "existing_security_group" {
+  id = "sg-0adbc9376d54ec844"
+}
+
+# Replace "subnet-group-name" with the name of your existing DB subnet group that includes the chosen subnet(s) for the RDS instance
+data "aws_db_subnet_group" "existing_db_subnet_group" {
+  name = "aws-b29-rds-sg"
+}
+
+# Create the PostgreSQL RDS instance
+resource "aws_db_instance" "postgres" {
+  identifier             = "my-postgres-db"
+  engine                 = "postgres"
+  engine_version         = "15"
+  instance_class         = "db.t3.micro"  # Change this to your desired instance type
+  allocated_storage      = 20
+  storage_type           = "gp2"
+  username               = "postgres"
+  password               = "postgres"  # Change this to your desired database password
+  parameter_group_name   = "default.postgres15"
+  publicly_accessible    = true
+  skip_final_snapshot    = true  # Set to false if you want to create a final snapshot on deletion
+
+  # Use the existing VPC, subnet, and subnet group IDs/names
+  vpc_security_group_ids = [data.aws_security_group.existing_security_group.id]
+  db_subnet_group_name    = data.aws_db_subnet_group.existing_db_subnet_group.name
+
+  # You can set the "availability_zone" attribute if you want to specify a specific AZ for the RDS instance
+  # availability_zone = "us-east-1a"
+}
+
+output "rds_endpoint" {
+  value = aws_db_instance.postgres.endpoint
+}
+
+
+Changes to Outputs:
+  + rds_endpoint = (known after apply)
+
+Do you want to perform these actions?
+  Terraform will perform the actions described above.
+  Only 'yes' will be accepted to approve.
+
+  Enter a value: yes
+
+aws_db_instance.postgres: Creating...
+aws_db_instance.postgres: Still creating... [10s elapsed]
+aws_db_instance.postgres: Still creating... [20s elapsed]
+..
+..
+
+aws_db_instance.postgres: Creation complete after 9m37s [id=db-YUACM3I3DNHCJQLF2RYII6AZZ4]
+
+Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+rds_endpoint = "my-postgres-db.cijxwe4ckz1m.us-east-1.rds.amazonaws.com:5432"
+[root@ip-10-82-2-84 terraform]#
+
+
+
+
+
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+sudo ./aws/install
+
+
+[root@ip-10-82-2-84 ~]# /usr/local/bin/aws configure
+AWS Access Key ID [None]: AKIA3TW7NMABPCYM4WIC
+AWS Secret Access Key [None]: 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
+Default region name [None]: us-east-1
+Default output format [None]:
+
+
+/usr/local/bin/aws rds create-db-instance \
+    --engine postgres \
+    --db-instance-identifier mypostgrescli3 \
+    --allocated-storage 25 \
+    --db-instance-class db.t3.micro \
+    --vpc-security-group-ids sg-0adbc9376d54ec844 \
+    --db-subnet-group aws-b29-rds-sg \
+    --master-username postgres \
+    --master-user-password postgres \
+    --backup-retention-period 3 \
+	--publicly-accessible
