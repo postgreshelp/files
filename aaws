@@ -40,8 +40,7 @@ unzip awscliv2.zip
 sudo ./aws/install
 
 aws configure
-AKIA3TW7NMABJ2GMUR6V
-3N51nRfaK12z0Xz0UFAVmm1kt+Sv/WMpxXdjhJp4
+4
 
 yum install jq
 
