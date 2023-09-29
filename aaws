@@ -1,0 +1,154 @@
+
+1. VPC	- 10.80.0.0/16
+2. SN   - Three subnets, 10.80.1.0/24 (us-east1a), 10.80.2.0/24(us-east1b),10.80.3.0/24(us-east1c),
+3. IGW  - Internet to your machine communication
+4. RT   - Route between internet and your subnets
+5. SG   - Firewall rules
+
+6. Generate KeyPairs
+7. Create EC2 instance
+8. Install postgres on EC2 
+
+	- We need postgresql client in either on-prem or ec2
+	
+9. Create RDS instance and connect from pgAdmin.
+
+VPC - B27***
+SG  - B27***
+
+1. CREATE EC2 and Install PostgreSQL
+2. CREATE RDS Instance
+3. CREATE replication instance***
+4. PARAMETER GROUP - postgresql.conf file.
+	
+	create a parameter group (sep20-evng)
+	edit one parameter (session_replica_role = replica)
+
+Oracle to PostgreSQL
+
+	1. Migrate metadata (SCT)
+	
+		- You may see issues in procedures, triggers and views.
+		- Generate report for better understanding.
+		
+	2. Migrate your data (DMS)
+
+https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
+
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+sudo ./aws/install
+
+aws configure
+AKIA3TW7NMABJ2GMUR6V
+3N51nRfaK12z0Xz0UFAVmm1kt+Sv/WMpxXdjhJp4
+
+yum install jq
+
+/usr/local/bin/aws rds create-db-instance \
+    --engine postgres  \
+    --db-instance-identifier mytest \
+    --allocated-storage 20 \
+    --db-instance-class db.t3.micro \
+    --vpc-security-group-ids sg-03a312c06da95311a \
+    --db-subnet-group default-vpc-0387d5a3a1ed77954 \
+    --master-username postgres \
+    --master-user-password postgres 
+	
+aws rds create-db-instance-read-replica \
+    --db-instance-identifier <source-db-instance-identifier> \
+    --db-instance-identifier <read-replica-identifier> \
+    --source-db-instance-identifier <source-db-instance-identifier> \
+    --db-instance-class <instance-class> \
+    --availability-zone <availability-zone> \
+    --port <port-number> \
+    --auto-minor-version-upgrade \
+    --option-group-name <option-group-name> \
+    --no-publicly-accessible \
+    --region <AWS-region>
+
+
+aws rds create-db-snapshot \
+    --db-instance-identifier mytest \
+    --db-snapshot-identifier myfirstbackup \
+    --region us-east-1
+
+aws rds describe-db-snapshots \
+    --db-snapshot-identifier myfirstbackup
+	
+aws rds describe-db-snapshots \
+    --db-snapshot-identifier myfirstbackup | jq | jq '.DBSnapshots[] | {PercentProgress}'
+
+aws rds delete-db-instance \
+    --db-instance-identifier <db-instance-identifier> \
+    --skip-final-snapshot \
+    --region <AWS-region>
+
+aws rds describe-db-instances --region us-east-1
+
+aws rds describe-db-instances --region <AWS-region> | jq '.DBInstances[] | {DBInstanceIdentifier, DBInstanceStatus, Engine, EngineVersion, Endpoint}'
+
+aws rds describe-db-snapshots --region us-east-1
+
+aws rds describe-db-snapshots --region  us-east-1 | jq '.DBSnapshots[] | {DBSnapshotIdentifier, DBInstanceIdentifier, SnapshotType, SnapshotCreateTime}'
+
+modify-db-instance
+
+aws rds promote-read-replica \
+    --db-instance-identifier <read-replica-identifier> \
+    --region <AWS-region>
+
+aws rds create-db-instance \
+    --db-instance-identifier <db-instance-identifier> \
+    --db-instance-class <db-instance-class> \
+    --engine postgres \
+    --engine-version <postgres-version> \
+    --allocated-storage <storage-size> \
+    --master-username <master-username> \
+    --master-user-password <master-password> \
+    --availability-zone <primary-availability-zone> \
+    --multi-az \
+    --region <AWS-region>
+
+rds.force_failover
+
+
+
+
+aws rds restore-db-instance-from-db-snapshot \
+    --db-instance-identifier mytest-rest \
+    --db-snapshot-identifier myfirstbackup \
+    --db-instance-class db.t3.micro \
+	--vpc-security-group-ids sg-0b1251fd5c1f69006 \
+    --db-subnet-group default-vpc-0a67f8b68e78d852d 
+
+
+aws rds describe-db-instances \
+  --db-instance-identifier mytest \
+  --query 'DBInstances[0].LatestRestorableTime' \
+  --output text
+  
+  
+aws rds restore-db-instance-to-point-in-time \
+  --source-db-instance-identifier mytest \
+  --target-db-instance-identifier mytest-pitr \
+  --restore-time 2023-09-15T09:14:19+00:00 \
+  --db-subnet-group default-vpc-0a67f8b68e78d852d 
+  
+  
+
+aws rds restore-db-instance-to-point-in-time \
+    --db-instance-identifier  mytest-pitr-rest\
+    --source-db-instance-identifier mytest \
+    --restore-time <timestamp> \
+    --db-instance-class <db-instance-class> \
+    --allocated-storage <allocated-storage> \
+    --master-username <master-username> \
+    --master-user-password <master-password> \
+    --region <AWS-region>
+
+aws rds create-db-snapshot \
+    --db-instance-identifier <db-instance-identifier> \
+    --db-snapshot-identifier <db-snapshot-identifier> \
+    --region <AWS-region>
+https://oracle-base.com/articles/19c/oracle-db-19c-installation-on-oracle-linux-8
